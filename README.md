@@ -29,6 +29,14 @@ import express from 'express'
 
 const app = express()
 
+const Controller = {
+  read() {},
+  create() {},
+  update() {},
+  destroy() {},
+  beforeEach() {},
+  afterEach() {},
+}
 function before1() { console.log('before1()') }
 function before2() { console.log('before2()') }
 function before3() { console.log('before3()') }
@@ -40,25 +48,27 @@ function get1() { console.log('get1()') }
 function get2() { console.log('get2()') }
 function put3() { console.log('put3()') }
 
-const routes = createRest(e => {
-  e.before(before1)
-  e.after(after1)
+const routes = createRest(r => {
+  r.before(before1, before1)
+  r.after(after1)
 
-  e.post('/', post1)
+  r.post('/', post1)
 
-  e.scope('demo', e => {
-    e.before(before2)
-    e.after(after2)
+  r.scope('demo', e => {
+    r.before(before2)
+    r.after(after2)
 
-    e.get('/', get1)
-    e.get('/foo', get2)
+    r.get('/', get1)
+    r.get('/foo', get2)
 
-    e.scope('bar', e => {
-      e.before(before3)
-      e.after(after3)
+    r.scope('bar', e => {
+      r.before(before3)
+      r.after(after3)
 
-      e.put('/', put3)
+      r.put('/', put3)
     })
+
+    r.resource('single', Controller, { except: ['destroy', 'create'] })
   })
 })
 
