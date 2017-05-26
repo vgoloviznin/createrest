@@ -8,6 +8,7 @@ const ObjectController = {
   create() {},
   read() {},
   update() {},
+  patch() {},
   destroy() {},
 
   beforeEach() {},

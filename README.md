@@ -213,3 +213,30 @@ POST /demo/ -> beforeEach(), create(), afterEach()
 GET /single/ -> beforeEach(), read(), afterEach()
 PUT /single/ -> beforeEach(), update(), afterEach()
 ```
+
+### resources
+
+```js
+const Controller = {
+  index() {},
+  read() {},
+  create() {},
+  update() {},
+  patch() {},
+  destroy() {},
+}
+const routes = createRest(r => {
+  r.resource('example', Controller)
+})
+
+printRoutes(routes, true)
+```
+
+```
+GET /example/ -> index()
+POST /example/ -> create()
+GET /example/:exampleId/ -> read()
+PUT /example/:exampleId/ -> update()
+PATCH /example/:exampleId/ -> patch()
+DELETE /example/:exampleId/ -> destroy()
+``
