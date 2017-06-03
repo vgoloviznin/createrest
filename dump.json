@@ -1,0 +1,1653 @@
+[
+  {
+    "__docId__": 0,
+    "kind": "file",
+    "name": "lib/flatten.js",
+    "content": "/**\n * Recursive flatten\n * @private\n * @param {RestRoutes} routes Routes object from `createRest()`\n * @param {string} prefix Add prefix to each route path\n * @param {RestRoutes} parent Parent routes\n */\nfunction flattenize(routes, prefix, parent) {\n  const list = {}\n\n  Object.keys(routes.local).forEach(method => {\n    const localName = prefix === '' ? '/' : `${prefix}/`\n\n    if (!list[localName]) {\n      list[localName] = {}\n    }\n    list[localName][method] = [].concat(\n      parent.before,\n      routes.before,\n      routes.local[method],\n      routes.after,\n      parent.after\n    )\n  })\n\n  Object.keys(routes.scoped).forEach(scope => {\n    const scoped = routes.scoped[scope]\n    const listeners = flattenize(scoped, `${prefix}/${scope}`, {\n      before: parent.before.concat(routes.before),\n      after: routes.after.concat(parent.after),\n    })\n    Object.assign(list, listeners)\n  })\n\n  return list\n}\n\n/**\n * Convert original deep routes to flat object\n * @param {RestRoutes} routes Original routes from `createRest()`\n * @return {object} Flattened routes object\n * @example\n * const handler = () => {}\n * const routes = createRest(r => { r.get('foo', handler) })\n * const flatRoutes = flattenRoutes(routes)\n *\n * test.deepEqual(\n *   flatRoutes,\n *   {\n *     '/foo/': {\n *       GET: [handler],\n *     },\n *   },\n * )\n */\nexport function flattenRoutes(routes) {\n  return flattenize(routes, '', { before: [], after: [] })\n}\n",
+    "static": true,
+    "longname": "lib/flatten.js",
+    "access": null,
+    "description": null,
+    "lineNumber": 1
+  },
+  {
+    "__docId__": 1,
+    "kind": "function",
+    "name": "flattenize",
+    "memberof": "lib/flatten.js",
+    "generator": false,
+    "async": false,
+    "static": true,
+    "longname": "lib/flatten.js~flattenize",
+    "access": "private",
+    "export": false,
+    "importPath": "createrest/lib/flatten.js",
+    "importStyle": null,
+    "description": "Recursive flatten",
+    "lineNumber": 8,
+    "params": [
+      {
+        "nullable": null,
+        "types": [
+          "RestRoutes"
+        ],
+        "spread": false,
+        "optional": false,
+        "name": "routes",
+        "description": "Routes object from `createRest()`"
+      },
+      {
+        "nullable": null,
+        "types": [
+          "string"
+        ],
+        "spread": false,
+        "optional": false,
+        "name": "prefix",
+        "description": "Add prefix to each route path"
+      },
+      {
+        "nullable": null,
+        "types": [
+          "RestRoutes"
+        ],
+        "spread": false,
+        "optional": false,
+        "name": "parent",
+        "description": "Parent routes"
+      }
+    ],
+    "return": {
+      "types": [
+        "*"
+      ]
+    }
+  },
+  {
+    "__docId__": 2,
+    "kind": "function",
+    "name": "flattenRoutes",
+    "memberof": "lib/flatten.js",
+    "generator": false,
+    "async": false,
+    "static": true,
+    "longname": "lib/flatten.js~flattenRoutes",
+    "access": null,
+    "export": true,
+    "importPath": "createrest/lib/flatten.js",
+    "importStyle": "{flattenRoutes}",
+    "description": "Convert original deep routes to flat object",
+    "examples": [
+      "const handler = () => {}\nconst routes = createRest(r => { r.get('foo', handler) })\nconst flatRoutes = flattenRoutes(routes)\n\ntest.deepEqual(\n  flatRoutes,\n  {\n    '/foo/': {\n      GET: [handler],\n    },\n  },\n)"
+    ],
+    "lineNumber": 56,
+    "params": [
+      {
+        "nullable": null,
+        "types": [
+          "RestRoutes"
+        ],
+        "spread": false,
+        "optional": false,
+        "name": "routes",
+        "description": "Original routes from `createRest()`"
+      }
+    ],
+    "return": {
+      "nullable": null,
+      "types": [
+        "object"
+      ],
+      "spread": false,
+      "description": "Flattened routes object"
+    }
+  },
+  {
+    "__docId__": 3,
+    "kind": "file",
+    "name": "lib/index.js",
+    "content": "\n/**\n * @desc Simple object for `resource()`\n * @typedef {object} ResourceController\n * @property {function} [beforeEach] Called before each request\n * @property {function} [afterEach] Called after each request\n * @property {function} [read] Handle GET /name\n * @property {function} [create] Handle POST /name\n * @property {function} [update] Handle PUT /name\n * @property {function} [destroy] handle DELETE /name\n * @example\n * const DemoController = {\n *   beforeEach(req, res, next) {\n *     // any checks here\n *     next()\n *   },\n *   create(req, res, next) {\n *     context.makeDemo.create(req.params)\n *     res.json({ complete: true })\n *     next()\n *   },\n *   afterEach(req, res, next) {\n *     // close your resources here\n *     context.db.close()\n *   }\n * }\n */\n\n/**\n * @desc Routes object\n * @typedef {object} RestRoutes Foo bar\n */\n\n/**\n * @class Maker\n * @protected\n */\nexport class Maker {\n  /**\n   * @ignore\n   */\n  constructor() {\n    /**\n     * @ignore\n     */\n    this.ctx = {\n      before: [],\n      after: [],\n      scoped: {},\n      local: {},\n    }\n  }\n\n  /**\n   * @ignore\n   * Build routes ast\n   */\n  build() {\n    const scoped = {}\n    Object.keys(this.ctx.scoped).forEach(name => {\n      scoped[name] = this.ctx.scoped[name].build()\n    })\n    return Object.assign({}, this.ctx, { scoped })\n  }\n\n  /**\n   * Add middlewares before request handler to current scope\n   * @param {...function[]} list List of the middlewares\n   *\n   * @example\n   * createRest(r => {\n   *   r.before(() => console.log(1))\n   *   r.before(() => console.log(2), () => console.log(3))\n   * })\n   */\n  before(...list) {\n    this.ctx.before = this.ctx.before.concat(list.filter(ln => !!ln))\n  }\n\n  /**\n   * Add middlewares after request handler to current scope\n   * @param {...function[]} list List of the middlewares\n   * @example\n   * createRest(r => {\n   *   r.after(() => console.log(3))\n   *   r.after(() => console.log(2), () => console.log(1))\n   * })\n   */\n  after(...list) {\n    this.ctx.after = this.ctx.after.concat(list.filter(ln => !!ln))\n  }\n\n  /**\n   * Add scoped address, before/after handlers and simple handlers.\n   * Before/After handlers is inherits from parent scope.\n   * Scopes don't merging. Use only one scope for unique path.\n   *\n   * @param {string} name Name of the scope\n   * @param {function(r: Maker): undefined} creator\n   * @throws {Error}\n   * @throws {TypeError}\n   * @example\n   * createRest(r => {\n   *   r.before(() => console.log(1))\n   *   r.after(() => console.log(4))\n   *\n   *   r.scope('foo', r => {\n   *     r.before(() => console.log(2))\n   *     r.after(() => console.log(5))\n   *\n   *     r.get('bar', () => console.log(3))\n   *   })\n   * })\n   */\n  scope(name, creator) {\n    if (typeof name !== 'string') {\n      throw new TypeError('Name of the scope should be string!')\n    }\n    if (name.length === 0 || name.indexOf('/') !== -1) {\n      throw new Error('Name of the scope should be a word')\n    }\n\n    const scopedCtx = new Maker()\n    creator(scopedCtx)\n    this.ctx.scoped[name] = scopedCtx\n  }\n\n  /**\n   * Add HTTP method listeners to local\n   *\n   * @ignore\n   * @param {string} method\n   * @param {function[]} listeners\n   */\n  local(method, listeners) {\n    // if listeners for that methods exists, simple merge\n    if (this.ctx.local[method]) {\n      this.ctx.local[method] = this.ctx.local[method].concat(listeners)\n    }\n    else {\n      this.ctx.local[method] = listeners\n    }\n  }\n\n  /**\n   * Handle method creator\n   *\n   * @ignore\n   * @param {string} name\n   * @param {string} method\n   * @param {function[]} listeners\n   */\n  method(method, _listeners) {\n    let name = ''\n    let listeners = _listeners\n    if (typeof listeners[0] === 'string') {\n      name = listeners.splice(0, 1)[0]\n    }\n    name = name.replace(/^\\//gm, '')\n\n    if (name.indexOf('/') !== -1) {\n      throw new Error('Path should not be deep')\n    }\n    if (listeners.length === 0) {\n      throw new TypeError('Maybe you forget to add listener?')\n    }\n\n    listeners = listeners.filter(e => typeof e === 'function')\n\n    // if added undefined listeners\n    if (listeners.length === 0) return\n\n    if (name !== '') {\n      let scoped = this.ctx.scoped[name]\n      if (!scoped) {\n        scoped = new Maker()\n        this.ctx.scoped[name] = scoped\n      }\n\n      scoped.local(method, listeners)\n    }\n    else {\n      this.local(method, listeners)\n    }\n  }\n\n  /**\n   * Handle POST HTTP method with single or many handlers\n   * @param {string} [name] Route path. Default is current scope\n   * @param {...function} handlers List of http-handlers\n   * @throws {Error} Path should not be deep\n   * @throws {TypeError} Maybe you forget to add listener?\n   * @example\n   * createRest(r => {\n   *   r.post('name', () => console.log('Handled post /name request'))\n   *   r.post(() => console.log('Handled post / request'))\n   *   r.post('create',\n   *     (req, res, next) => next(),\n   *     authorize('user'),\n   *     () => console.log('Handled post /create with middlewares')\n   *   )\n   * })\n   */\n  post(name, ...handlers) {\n    this.method('POST', [name, ...handlers])\n  }\n\n  /**\n   * Handle GET HTTP method with single or many handlers\n   * @param {string} [name] Route path. Default is current scope\n   * @param {...function} handlers List of http-handlers\n   * @throws {Error} Path should not be deep\n   * @throws {TypeError} Maybe you forget to add listener?\n   * @example\n   * createRest(r => {\n   *   r.get('name', () => console.log('Handled get /name request'))\n   *   r.get(() => console.log('Handled get / request'))\n   *   r.get('create',\n   *     (req, res, next) => next(),\n   *     authorize('user'),\n   *     () => console.log('Handled get /create with middlewares')\n   *   )\n   * })\n   */\n  get(name, ...handlers) {\n    this.method('GET', [name, ...handlers])\n  }\n\n  /**\n   * Handle PUT HTTP method with single or many handlers\n   * @param {string} [name] Route path. Default is current scope\n   * @param {...function} handlers List of http-handlers\n   * @throws {Error} Path should not be deep\n   * @throws {TypeError} Maybe you forget to add listener?\n   * @example\n   * createRest(r => {\n   *   r.put('name', () => console.log('Handled put /name request'))\n   *   r.put(() => console.log('Handled put / request'))\n   *   r.put('create',\n   *     (req, res, next) => next(),\n   *     authorize('user'),\n   *     () => console.log('Handled put /create with middlewares')\n   *   )\n   * })\n   */\n  put(name, ...handlers) {\n    this.method('PUT', [name, ...handlers])\n  }\n\n  /**\n   * Handle DELETE HTTP method with single or many handlers\n   * @param {string} [name] Route path. Default is current scope\n   * @param {...function} handlers List of http-handlers\n   * @throws {Error} Path should not be deep\n   * @throws {TypeError} Maybe you forget to add listener?\n   * @example\n   * createRest(r => {\n   *   r.delete('name', () => console.log('Handled delete /name request'))\n   *   r.delete(() => console.log('Handled delete / request'))\n   *   r.delete('create',\n   *     (req, res, next) => next(),\n   *     authorize('user'),\n   *     () => console.log('Handled delete /create with middlewares')\n   *   )\n   * })\n   */\n  delete(name, ...handlers) {\n    this.method('DELETE', [name, ...handlers])\n  }\n\n  /**\n   * Handle PATCH HTTP method with single or many handlers\n   * @param {string} [name] Route path. Default is current scope\n   * @param {...function} handlers List of http-handlers\n   * @throws {Error} Path should not be deep\n   * @throws {TypeError} Maybe you forget to add listener?\n   * @example\n   * createRest(r => {\n   *   r.patch('name', () => console.log('Handled patch /name request'))\n   *   r.patch(() => console.log('Handled patch / request'))\n   *   r.patch('create',\n   *     (req, res, next) => next(),\n   *     authorize('user'),\n   *     () => console.log('Handled patch /create with middlewares')\n   *   )\n   * })\n   */\n  patch(name, ...handlers) {\n    this.method('PATCH', [name, ...handlers])\n  }\n\n  /**\n   * @desc Configure your `resource('name', controller, options)`\n   * @typedef {object} resourceOptions\n   * @property {string[]} [only] Keep only that handlers: `[read, create, update, destroy]`\n   * @property {string[]} [except] Keep all except that handlers\n   * @property {object} [methodNames] Change method names\n   *\n   * @example <caption>Usage with `only`</caption>\n   * createRest(r => {\n   *   r.resource('foo', FooController, { only: ['read'] })\n   * })\n   *\n   * @example <caption>Usage with `except`</caption>\n   * createRest(r => {\n   *   r.resource('bar', BarController, { except: ['destroy', 'update'] })\n   * })\n   *\n   * @example <caption>Method names</caption>\n   * const Controller = {\n   *   createDemo() {},\n   *   updateMe() {},\n   *   justExample() {},\n   *   youDontNeedThis() {},\n   * }\n   * createRest(r => {\n   *   r.resource('demo', Controller, { methodNames: {\n   *     read: 'justExample', create: 'createDemo', update: 'updateMe', destroy: 'youDontNeedThis',\n   *   }})\n   * })\n   */\n\n  /**\n   * Create CRUD methods for single resource.\n   *\n   * Resources not merging. Use only one resource for path.\n   * @param {string} name Name of the resource. Create route path from\n   * @param {ResourceController} controller Object with methods\n   * @param {resourceOptions} [options={}] Options object\n   * @example\n   * const Controller = {\n   *   read() {},\n   *   create() {},\n   *   update() {},\n   *   destroy() {},\n   *   beforeEach() {},\n   *   afterEach() {},\n   * }\n   * const SecondCtrl = {\n   *   read() {},\n   *   update() {},\n   * }\n   * const routes = createRest(r => {\n   *   r.resource('example', Controller)\n   *   r.resource('demo', Controller, { only: ['create', 'read'] })\n   *   r.resource('single', Controller, { except: ['destroy', 'create'] })\n   * })\n   * printRoutes(routes, true)\n   */\n  resource(name, controller, options = {}) {\n    if (!name || name.length === 0) {\n      throw new Error('Resource should be named')\n    }\n\n    if (typeof controller === 'undefined') {\n      return\n    }\n\n    const methods = {\n      read: 'get',\n      create: 'post',\n      update: 'put',\n      destroy: 'delete',\n    }\n    const methodsList = Object.keys(methods)\n\n    const resolveMethodName = (handler, currentController) => options.methodNames && options.methodNames[handler]\n      ? currentController[options.methodNames[handler]]\n      : currentController[handler]\n\n    /**\n     * @var {Array<[string, string]>} usedList [[handlerName, httpMethod], ...]\n     */\n    let usedList = []\n\n    if (Array.isArray(options.only)) {\n      usedList = options.only\n    }\n    else if (Array.isArray(options.except)) {\n      usedList = methodsList\n        .filter(handlerName => !options.except.includes(handlerName))\n    }\n    else {\n      usedList = methodsList\n    }\n\n    this.scope(name, r => {\n      r.before(controller.beforeEach)\n      r.after(controller.afterEach)\n\n      usedList\n        .filter(handler => methodsList.includes(handler))\n        .map(handler => [handler, methods[handler]])\n        .forEach(([handler, httpMethod]) => {\n          r[httpMethod](resolveMethodName(handler, controller))\n        })\n    })\n  }\n}\n\n/**\n * Create routes by sync callback\n * @param {function(r: Maker): null} creator Callback\n * @return {RestRoutes} Routes object\n */\nexport function createRest(creator) {\n  if (typeof creator !== 'function') {\n    throw new TypeError('Creator should be a function')\n  }\n\n  const ctx = new Maker('')\n  creator(ctx)\n  return ctx.build()\n}\n\nexport { flattenRoutes } from './flatten'\nexport { printRoutes } from './printer'\n\n",
+    "static": true,
+    "longname": "lib/index.js",
+    "access": null,
+    "description": null,
+    "lineNumber": 1
+  },
+  {
+    "__docId__": 4,
+    "kind": "typedef",
+    "name": "ResourceController",
+    "memberof": "lib/index.js",
+    "static": true,
+    "longname": "lib/index.js~ResourceController",
+    "access": null,
+    "description": "Simple object for `resource()`",
+    "examples": [
+      "const DemoController = {\n  beforeEach(req, res, next) {\n    // any checks here\n    next()\n  },\n  create(req, res, next) {\n    context.makeDemo.create(req.params)\n    res.json({ complete: true })\n    next()\n  },\n  afterEach(req, res, next) {\n    // close your resources here\n    context.db.close()\n  }\n}"
+    ],
+    "properties": [
+      {
+        "nullable": null,
+        "types": [
+          "function"
+        ],
+        "spread": false,
+        "optional": true,
+        "name": "beforeEach",
+        "description": "Called before each request"
+      },
+      {
+        "nullable": null,
+        "types": [
+          "function"
+        ],
+        "spread": false,
+        "optional": true,
+        "name": "afterEach",
+        "description": "Called after each request"
+      },
+      {
+        "nullable": null,
+        "types": [
+          "function"
+        ],
+        "spread": false,
+        "optional": true,
+        "name": "read",
+        "description": "Handle GET /name"
+      },
+      {
+        "nullable": null,
+        "types": [
+          "function"
+        ],
+        "spread": false,
+        "optional": true,
+        "name": "create",
+        "description": "Handle POST /name"
+      },
+      {
+        "nullable": null,
+        "types": [
+          "function"
+        ],
+        "spread": false,
+        "optional": true,
+        "name": "update",
+        "description": "Handle PUT /name"
+      },
+      {
+        "nullable": null,
+        "types": [
+          "function"
+        ],
+        "spread": false,
+        "optional": true,
+        "name": "destroy",
+        "description": "handle DELETE /name"
+      }
+    ],
+    "type": {
+      "types": [
+        "object"
+      ],
+      "optional": false,
+      "name": "ResourceController"
+    }
+  },
+  {
+    "__docId__": 5,
+    "kind": "typedef",
+    "name": "RestRoutes",
+    "memberof": "lib/index.js",
+    "static": true,
+    "longname": "lib/index.js~RestRoutes",
+    "access": null,
+    "description": "Routes object",
+    "type": {
+      "types": [
+        "object"
+      ],
+      "optional": false,
+      "name": "RestRoutes"
+    }
+  },
+  {
+    "__docId__": 6,
+    "kind": "class",
+    "name": "Maker",
+    "memberof": "lib/index.js",
+    "static": true,
+    "longname": "lib/index.js~Maker",
+    "access": "protected",
+    "export": true,
+    "importPath": "createrest/lib/index.js",
+    "importStyle": "{Maker}",
+    "description": "",
+    "lineNumber": 38,
+    "unknown": [
+      {
+        "tagName": "@class",
+        "tagValue": "Maker"
+      }
+    ],
+    "interface": false
+  },
+  {
+    "__docId__": 7,
+    "kind": "constructor",
+    "name": "constructor",
+    "memberof": "lib/index.js~Maker",
+    "generator": false,
+    "async": false,
+    "static": false,
+    "longname": "lib/index.js~Maker#constructor",
+    "access": null,
+    "description": "",
+    "lineNumber": 42,
+    "ignore": true,
+    "params": []
+  },
+  {
+    "__docId__": 8,
+    "kind": "member",
+    "name": "ctx",
+    "memberof": "lib/index.js~Maker",
+    "static": false,
+    "longname": "lib/index.js~Maker#ctx",
+    "access": null,
+    "description": "",
+    "lineNumber": 46,
+    "ignore": true,
+    "type": {
+      "types": [
+        "{\"before\": *, \"after\": *, \"scoped\": *, \"local\": *}"
+      ]
+    }
+  },
+  {
+    "__docId__": 9,
+    "kind": "method",
+    "name": "build",
+    "memberof": "lib/index.js~Maker",
+    "generator": false,
+    "async": false,
+    "static": false,
+    "longname": "lib/index.js~Maker#build",
+    "access": null,
+    "description": "",
+    "lineNumber": 58,
+    "ignore": true,
+    "params": [],
+    "return": {
+      "types": [
+        "*"
+      ]
+    }
+  },
+  {
+    "__docId__": 10,
+    "kind": "method",
+    "name": "before",
+    "memberof": "lib/index.js~Maker",
+    "generator": false,
+    "async": false,
+    "static": false,
+    "longname": "lib/index.js~Maker#before",
+    "access": null,
+    "description": "Add middlewares before request handler to current scope",
+    "examples": [
+      "createRest(r => {\n  r.before(() => console.log(1))\n  r.before(() => console.log(2), () => console.log(3))\n})"
+    ],
+    "lineNumber": 76,
+    "params": [
+      {
+        "nullable": null,
+        "types": [
+          "...function[]"
+        ],
+        "spread": true,
+        "optional": false,
+        "name": "list",
+        "description": "List of the middlewares"
+      }
+    ]
+  },
+  {
+    "__docId__": 11,
+    "kind": "method",
+    "name": "after",
+    "memberof": "lib/index.js~Maker",
+    "generator": false,
+    "async": false,
+    "static": false,
+    "longname": "lib/index.js~Maker#after",
+    "access": null,
+    "description": "Add middlewares after request handler to current scope",
+    "examples": [
+      "createRest(r => {\n  r.after(() => console.log(3))\n  r.after(() => console.log(2), () => console.log(1))\n})"
+    ],
+    "lineNumber": 89,
+    "params": [
+      {
+        "nullable": null,
+        "types": [
+          "...function[]"
+        ],
+        "spread": true,
+        "optional": false,
+        "name": "list",
+        "description": "List of the middlewares"
+      }
+    ]
+  },
+  {
+    "__docId__": 12,
+    "kind": "method",
+    "name": "scope",
+    "memberof": "lib/index.js~Maker",
+    "generator": false,
+    "async": false,
+    "static": false,
+    "longname": "lib/index.js~Maker#scope",
+    "access": null,
+    "description": "Add scoped address, before/after handlers and simple handlers.\nBefore/After handlers is inherits from parent scope.\nScopes don't merging. Use only one scope for unique path.",
+    "examples": [
+      "createRest(r => {\n  r.before(() => console.log(1))\n  r.after(() => console.log(4))\n\n  r.scope('foo', r => {\n    r.before(() => console.log(2))\n    r.after(() => console.log(5))\n\n    r.get('bar', () => console.log(3))\n  })\n})"
+    ],
+    "lineNumber": 115,
+    "params": [
+      {
+        "nullable": null,
+        "types": [
+          "string"
+        ],
+        "spread": false,
+        "optional": false,
+        "name": "name",
+        "description": "Name of the scope"
+      },
+      {
+        "nullable": null,
+        "types": [
+          "function(r: Maker): undefined"
+        ],
+        "spread": false,
+        "optional": false,
+        "name": "creator",
+        "description": ""
+      }
+    ],
+    "throws": [
+      {
+        "types": [
+          "Error"
+        ],
+        "description": ""
+      },
+      {
+        "types": [
+          "TypeError"
+        ],
+        "description": ""
+      }
+    ]
+  },
+  {
+    "__docId__": 13,
+    "kind": "method",
+    "name": "local",
+    "memberof": "lib/index.js~Maker",
+    "generator": false,
+    "async": false,
+    "static": false,
+    "longname": "lib/index.js~Maker#local",
+    "access": null,
+    "description": "Add HTTP method listeners to local",
+    "lineNumber": 135,
+    "ignore": true,
+    "params": [
+      {
+        "nullable": null,
+        "types": [
+          "string"
+        ],
+        "spread": false,
+        "optional": false,
+        "name": "method",
+        "description": ""
+      },
+      {
+        "nullable": null,
+        "types": [
+          "function[]"
+        ],
+        "spread": false,
+        "optional": false,
+        "name": "listeners",
+        "description": ""
+      }
+    ]
+  },
+  {
+    "__docId__": 14,
+    "kind": "method",
+    "name": "method",
+    "memberof": "lib/index.js~Maker",
+    "generator": false,
+    "async": false,
+    "static": false,
+    "longname": "lib/index.js~Maker#method",
+    "access": null,
+    "description": "Handle method creator",
+    "lineNumber": 153,
+    "ignore": true,
+    "params": [
+      {
+        "nullable": null,
+        "types": [
+          "string"
+        ],
+        "spread": false,
+        "optional": false,
+        "name": "name",
+        "description": ""
+      },
+      {
+        "nullable": null,
+        "types": [
+          "string"
+        ],
+        "spread": false,
+        "optional": false,
+        "name": "method",
+        "description": ""
+      },
+      {
+        "nullable": null,
+        "types": [
+          "function[]"
+        ],
+        "spread": false,
+        "optional": false,
+        "name": "listeners",
+        "description": ""
+      }
+    ]
+  },
+  {
+    "__docId__": 15,
+    "kind": "method",
+    "name": "post",
+    "memberof": "lib/index.js~Maker",
+    "generator": false,
+    "async": false,
+    "static": false,
+    "longname": "lib/index.js~Maker#post",
+    "access": null,
+    "description": "Handle POST HTTP method with single or many handlers",
+    "examples": [
+      "createRest(r => {\n  r.post('name', () => console.log('Handled post /name request'))\n  r.post(() => console.log('Handled post / request'))\n  r.post('create',\n    (req, res, next) => next(),\n    authorize('user'),\n    () => console.log('Handled post /create with middlewares')\n  )\n})"
+    ],
+    "lineNumber": 204,
+    "params": [
+      {
+        "nullable": null,
+        "types": [
+          "string"
+        ],
+        "spread": false,
+        "optional": true,
+        "name": "name",
+        "description": "Route path. Default is current scope"
+      },
+      {
+        "nullable": null,
+        "types": [
+          "...function"
+        ],
+        "spread": true,
+        "optional": false,
+        "name": "handlers",
+        "description": "List of http-handlers"
+      }
+    ],
+    "throws": [
+      {
+        "types": [
+          "Error"
+        ],
+        "description": "Path should not be deep"
+      },
+      {
+        "types": [
+          "TypeError"
+        ],
+        "description": "Maybe you forget to add listener?"
+      }
+    ]
+  },
+  {
+    "__docId__": 16,
+    "kind": "method",
+    "name": "get",
+    "memberof": "lib/index.js~Maker",
+    "generator": false,
+    "async": false,
+    "static": false,
+    "longname": "lib/index.js~Maker#get",
+    "access": null,
+    "description": "Handle GET HTTP method with single or many handlers",
+    "examples": [
+      "createRest(r => {\n  r.get('name', () => console.log('Handled get /name request'))\n  r.get(() => console.log('Handled get / request'))\n  r.get('create',\n    (req, res, next) => next(),\n    authorize('user'),\n    () => console.log('Handled get /create with middlewares')\n  )\n})"
+    ],
+    "lineNumber": 225,
+    "params": [
+      {
+        "nullable": null,
+        "types": [
+          "string"
+        ],
+        "spread": false,
+        "optional": true,
+        "name": "name",
+        "description": "Route path. Default is current scope"
+      },
+      {
+        "nullable": null,
+        "types": [
+          "...function"
+        ],
+        "spread": true,
+        "optional": false,
+        "name": "handlers",
+        "description": "List of http-handlers"
+      }
+    ],
+    "throws": [
+      {
+        "types": [
+          "Error"
+        ],
+        "description": "Path should not be deep"
+      },
+      {
+        "types": [
+          "TypeError"
+        ],
+        "description": "Maybe you forget to add listener?"
+      }
+    ]
+  },
+  {
+    "__docId__": 17,
+    "kind": "method",
+    "name": "put",
+    "memberof": "lib/index.js~Maker",
+    "generator": false,
+    "async": false,
+    "static": false,
+    "longname": "lib/index.js~Maker#put",
+    "access": null,
+    "description": "Handle PUT HTTP method with single or many handlers",
+    "examples": [
+      "createRest(r => {\n  r.put('name', () => console.log('Handled put /name request'))\n  r.put(() => console.log('Handled put / request'))\n  r.put('create',\n    (req, res, next) => next(),\n    authorize('user'),\n    () => console.log('Handled put /create with middlewares')\n  )\n})"
+    ],
+    "lineNumber": 246,
+    "params": [
+      {
+        "nullable": null,
+        "types": [
+          "string"
+        ],
+        "spread": false,
+        "optional": true,
+        "name": "name",
+        "description": "Route path. Default is current scope"
+      },
+      {
+        "nullable": null,
+        "types": [
+          "...function"
+        ],
+        "spread": true,
+        "optional": false,
+        "name": "handlers",
+        "description": "List of http-handlers"
+      }
+    ],
+    "throws": [
+      {
+        "types": [
+          "Error"
+        ],
+        "description": "Path should not be deep"
+      },
+      {
+        "types": [
+          "TypeError"
+        ],
+        "description": "Maybe you forget to add listener?"
+      }
+    ]
+  },
+  {
+    "__docId__": 18,
+    "kind": "method",
+    "name": "delete",
+    "memberof": "lib/index.js~Maker",
+    "generator": false,
+    "async": false,
+    "static": false,
+    "longname": "lib/index.js~Maker#delete",
+    "access": null,
+    "description": "Handle DELETE HTTP method with single or many handlers",
+    "examples": [
+      "createRest(r => {\n  r.delete('name', () => console.log('Handled delete /name request'))\n  r.delete(() => console.log('Handled delete / request'))\n  r.delete('create',\n    (req, res, next) => next(),\n    authorize('user'),\n    () => console.log('Handled delete /create with middlewares')\n  )\n})"
+    ],
+    "lineNumber": 267,
+    "params": [
+      {
+        "nullable": null,
+        "types": [
+          "string"
+        ],
+        "spread": false,
+        "optional": true,
+        "name": "name",
+        "description": "Route path. Default is current scope"
+      },
+      {
+        "nullable": null,
+        "types": [
+          "...function"
+        ],
+        "spread": true,
+        "optional": false,
+        "name": "handlers",
+        "description": "List of http-handlers"
+      }
+    ],
+    "throws": [
+      {
+        "types": [
+          "Error"
+        ],
+        "description": "Path should not be deep"
+      },
+      {
+        "types": [
+          "TypeError"
+        ],
+        "description": "Maybe you forget to add listener?"
+      }
+    ]
+  },
+  {
+    "__docId__": 19,
+    "kind": "method",
+    "name": "patch",
+    "memberof": "lib/index.js~Maker",
+    "generator": false,
+    "async": false,
+    "static": false,
+    "longname": "lib/index.js~Maker#patch",
+    "access": null,
+    "description": "Handle PATCH HTTP method with single or many handlers",
+    "examples": [
+      "createRest(r => {\n  r.patch('name', () => console.log('Handled patch /name request'))\n  r.patch(() => console.log('Handled patch / request'))\n  r.patch('create',\n    (req, res, next) => next(),\n    authorize('user'),\n    () => console.log('Handled patch /create with middlewares')\n  )\n})"
+    ],
+    "lineNumber": 288,
+    "params": [
+      {
+        "nullable": null,
+        "types": [
+          "string"
+        ],
+        "spread": false,
+        "optional": true,
+        "name": "name",
+        "description": "Route path. Default is current scope"
+      },
+      {
+        "nullable": null,
+        "types": [
+          "...function"
+        ],
+        "spread": true,
+        "optional": false,
+        "name": "handlers",
+        "description": "List of http-handlers"
+      }
+    ],
+    "throws": [
+      {
+        "types": [
+          "Error"
+        ],
+        "description": "Path should not be deep"
+      },
+      {
+        "types": [
+          "TypeError"
+        ],
+        "description": "Maybe you forget to add listener?"
+      }
+    ]
+  },
+  {
+    "__docId__": 20,
+    "kind": "typedef",
+    "name": "resourceOptions",
+    "memberof": "lib/index.js~Maker",
+    "static": true,
+    "longname": "lib/index.js~Maker.resourceOptions",
+    "access": null,
+    "description": "Configure your `resource('name', controller, options)`",
+    "examples": [
+      "<caption>Usage with `only`</caption>\ncreateRest(r => {\n  r.resource('foo', FooController, { only: ['read'] })\n})",
+      "<caption>Usage with `except`</caption>\ncreateRest(r => {\n  r.resource('bar', BarController, { except: ['destroy', 'update'] })\n})",
+      "<caption>Method names</caption>\nconst Controller = {\n  createDemo() {},\n  updateMe() {},\n  justExample() {},\n  youDontNeedThis() {},\n}\ncreateRest(r => {\n  r.resource('demo', Controller, { methodNames: {\n    read: 'justExample', create: 'createDemo', update: 'updateMe', destroy: 'youDontNeedThis',\n  }})\n})"
+    ],
+    "properties": [
+      {
+        "nullable": null,
+        "types": [
+          "string[]"
+        ],
+        "spread": false,
+        "optional": true,
+        "name": "only",
+        "description": "Keep only that handlers: `[read, create, update, destroy]`"
+      },
+      {
+        "nullable": null,
+        "types": [
+          "string[]"
+        ],
+        "spread": false,
+        "optional": true,
+        "name": "except",
+        "description": "Keep all except that handlers"
+      },
+      {
+        "nullable": null,
+        "types": [
+          "object"
+        ],
+        "spread": false,
+        "optional": true,
+        "name": "methodNames",
+        "description": "Change method names"
+      }
+    ],
+    "type": {
+      "types": [
+        "object"
+      ],
+      "optional": false,
+      "name": "resourceOptions"
+    }
+  },
+  {
+    "__docId__": 21,
+    "kind": "method",
+    "name": "resource",
+    "memberof": "lib/index.js~Maker",
+    "generator": false,
+    "async": false,
+    "static": false,
+    "longname": "lib/index.js~Maker#resource",
+    "access": null,
+    "description": "Create CRUD methods for single resource.\n\nResources not merging. Use only one resource for path.",
+    "examples": [
+      "const Controller = {\n  read() {},\n  create() {},\n  update() {},\n  destroy() {},\n  beforeEach() {},\n  afterEach() {},\n}\nconst SecondCtrl = {\n  read() {},\n  update() {},\n}\nconst routes = createRest(r => {\n  r.resource('example', Controller)\n  r.resource('demo', Controller, { only: ['create', 'read'] })\n  r.resource('single', Controller, { except: ['destroy', 'create'] })\n})\nprintRoutes(routes, true)"
+    ],
+    "lineNumber": 350,
+    "params": [
+      {
+        "nullable": null,
+        "types": [
+          "string"
+        ],
+        "spread": false,
+        "optional": false,
+        "name": "name",
+        "description": "Name of the resource. Create route path from"
+      },
+      {
+        "nullable": null,
+        "types": [
+          "ResourceController"
+        ],
+        "spread": false,
+        "optional": false,
+        "name": "controller",
+        "description": "Object with methods"
+      },
+      {
+        "nullable": null,
+        "types": [
+          "resourceOptions"
+        ],
+        "spread": false,
+        "optional": true,
+        "defaultValue": "{}",
+        "defaultRaw": {},
+        "name": "options",
+        "description": "Options object"
+      }
+    ]
+  },
+  {
+    "__docId__": 22,
+    "kind": "function",
+    "name": "createRest",
+    "memberof": "lib/index.js",
+    "generator": false,
+    "async": false,
+    "static": true,
+    "longname": "lib/index.js~createRest",
+    "access": null,
+    "export": true,
+    "importPath": "createrest/lib/index.js",
+    "importStyle": "{createRest}",
+    "description": "Create routes by sync callback",
+    "lineNumber": 406,
+    "params": [
+      {
+        "nullable": null,
+        "types": [
+          "function(r: Maker): null"
+        ],
+        "spread": false,
+        "optional": false,
+        "name": "creator",
+        "description": "Callback"
+      }
+    ],
+    "return": {
+      "nullable": null,
+      "types": [
+        "RestRoutes"
+      ],
+      "spread": false,
+      "description": "Routes object"
+    }
+  },
+  {
+    "__docId__": 23,
+    "kind": "file",
+    "name": "lib/printer.js",
+    "content": "import { flattenRoutes } from './flatten'\n\n/**\n * @namespace printer\n */\n\n/**\n * @private\n * @param {string} path\n * @param {string} method\n * @param {Function[]} handlers\n * @return {string}\n */\nfunction print(path, method, handlers) {\n  const handlersNames = handlers.map(handler => `${handler.name || '<function>'}()`).join(', ')\n\n  return `${method.toUpperCase()} ${path} -> ${handlersNames}`\n}\n\n/**\n * Print routes to console and string\n * @param {RestRoutes} routes\n * @param {boolean} realPrint\n * @return {string[]} Lines of the printed routes\n */\nexport function printRoutes(routes, realPrint = true) {\n  const flat = flattenRoutes(routes)\n  const lines = []\n\n  Object.keys(flat)\n    .forEach(path => {\n      const methods = flat[path]\n\n      Object.keys(methods).forEach(method => {\n        lines.push(print(path, method, methods[method]))\n      })\n    })\n\n  if (realPrint) {\n    // eslint-disable-next-line no-console\n    console.log(lines.join('\\n'))\n  }\n\n  return lines\n}\n",
+    "static": true,
+    "longname": "lib/printer.js",
+    "access": null,
+    "description": null,
+    "lineNumber": 1
+  },
+  {
+    "__docId__": 24,
+    "kind": "function",
+    "name": "print",
+    "memberof": "lib/printer.js",
+    "generator": false,
+    "async": false,
+    "static": true,
+    "longname": "lib/printer.js~print",
+    "access": "private",
+    "export": false,
+    "importPath": "createrest/lib/printer.js",
+    "importStyle": null,
+    "description": "",
+    "lineNumber": 14,
+    "params": [
+      {
+        "nullable": null,
+        "types": [
+          "string"
+        ],
+        "spread": false,
+        "optional": false,
+        "name": "path",
+        "description": ""
+      },
+      {
+        "nullable": null,
+        "types": [
+          "string"
+        ],
+        "spread": false,
+        "optional": false,
+        "name": "method",
+        "description": ""
+      },
+      {
+        "nullable": null,
+        "types": [
+          "Function[]"
+        ],
+        "spread": false,
+        "optional": false,
+        "name": "handlers",
+        "description": ""
+      }
+    ],
+    "return": {
+      "nullable": null,
+      "types": [
+        "string"
+      ],
+      "spread": false,
+      "description": ""
+    }
+  },
+  {
+    "__docId__": 25,
+    "kind": "function",
+    "name": "printRoutes",
+    "memberof": "lib/printer.js",
+    "generator": false,
+    "async": false,
+    "static": true,
+    "longname": "lib/printer.js~printRoutes",
+    "access": null,
+    "export": true,
+    "importPath": "createrest/lib/printer.js",
+    "importStyle": "{printRoutes}",
+    "description": "Print routes to console and string",
+    "lineNumber": 26,
+    "params": [
+      {
+        "nullable": null,
+        "types": [
+          "RestRoutes"
+        ],
+        "spread": false,
+        "optional": false,
+        "name": "routes",
+        "description": ""
+      },
+      {
+        "nullable": null,
+        "types": [
+          "boolean"
+        ],
+        "spread": false,
+        "optional": false,
+        "name": "realPrint",
+        "description": ""
+      }
+    ],
+    "return": {
+      "nullable": null,
+      "types": [
+        "string[]"
+      ],
+      "spread": false,
+      "description": "Lines of the printed routes"
+    }
+  },
+  {
+    "__docId__": 27,
+    "kind": "external",
+    "name": "Infinity",
+    "externalLink": "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Infinity",
+    "memberof": "BuiltinExternal/ECMAScriptExternal.js",
+    "static": true,
+    "longname": "BuiltinExternal/ECMAScriptExternal.js~Infinity",
+    "access": null,
+    "description": "",
+    "builtinExternal": true
+  },
+  {
+    "__docId__": 28,
+    "kind": "external",
+    "name": "NaN",
+    "externalLink": "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/NaN",
+    "memberof": "BuiltinExternal/ECMAScriptExternal.js",
+    "static": true,
+    "longname": "BuiltinExternal/ECMAScriptExternal.js~NaN",
+    "access": null,
+    "description": "",
+    "builtinExternal": true
+  },
+  {
+    "__docId__": 29,
+    "kind": "external",
+    "name": "undefined",
+    "externalLink": "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/undefined",
+    "memberof": "BuiltinExternal/ECMAScriptExternal.js",
+    "static": true,
+    "longname": "BuiltinExternal/ECMAScriptExternal.js~undefined",
+    "access": null,
+    "description": "",
+    "builtinExternal": true
+  },
+  {
+    "__docId__": 30,
+    "kind": "external",
+    "name": "null",
+    "externalLink": "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/null",
+    "memberof": "BuiltinExternal/ECMAScriptExternal.js",
+    "static": true,
+    "longname": "BuiltinExternal/ECMAScriptExternal.js~null",
+    "access": null,
+    "description": "",
+    "builtinExternal": true
+  },
+  {
+    "__docId__": 31,
+    "kind": "external",
+    "name": "Object",
+    "externalLink": "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Object",
+    "memberof": "BuiltinExternal/ECMAScriptExternal.js",
+    "static": true,
+    "longname": "BuiltinExternal/ECMAScriptExternal.js~Object",
+    "access": null,
+    "description": "",
+    "builtinExternal": true
+  },
+  {
+    "__docId__": 32,
+    "kind": "external",
+    "name": "object",
+    "externalLink": "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Object",
+    "memberof": "BuiltinExternal/ECMAScriptExternal.js",
+    "static": true,
+    "longname": "BuiltinExternal/ECMAScriptExternal.js~object",
+    "access": null,
+    "description": "",
+    "builtinExternal": true
+  },
+  {
+    "__docId__": 33,
+    "kind": "external",
+    "name": "Function",
+    "externalLink": "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Function",
+    "memberof": "BuiltinExternal/ECMAScriptExternal.js",
+    "static": true,
+    "longname": "BuiltinExternal/ECMAScriptExternal.js~Function",
+    "access": null,
+    "description": "",
+    "builtinExternal": true
+  },
+  {
+    "__docId__": 34,
+    "kind": "external",
+    "name": "function",
+    "externalLink": "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Function",
+    "memberof": "BuiltinExternal/ECMAScriptExternal.js",
+    "static": true,
+    "longname": "BuiltinExternal/ECMAScriptExternal.js~function",
+    "access": null,
+    "description": "",
+    "builtinExternal": true
+  },
+  {
+    "__docId__": 35,
+    "kind": "external",
+    "name": "Boolean",
+    "externalLink": "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Boolean",
+    "memberof": "BuiltinExternal/ECMAScriptExternal.js",
+    "static": true,
+    "longname": "BuiltinExternal/ECMAScriptExternal.js~Boolean",
+    "access": null,
+    "description": "",
+    "builtinExternal": true
+  },
+  {
+    "__docId__": 36,
+    "kind": "external",
+    "name": "boolean",
+    "externalLink": "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Boolean",
+    "memberof": "BuiltinExternal/ECMAScriptExternal.js",
+    "static": true,
+    "longname": "BuiltinExternal/ECMAScriptExternal.js~boolean",
+    "access": null,
+    "description": "",
+    "builtinExternal": true
+  },
+  {
+    "__docId__": 37,
+    "kind": "external",
+    "name": "Symbol",
+    "externalLink": "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Symbol",
+    "memberof": "BuiltinExternal/ECMAScriptExternal.js",
+    "static": true,
+    "longname": "BuiltinExternal/ECMAScriptExternal.js~Symbol",
+    "access": null,
+    "description": "",
+    "builtinExternal": true
+  },
+  {
+    "__docId__": 38,
+    "kind": "external",
+    "name": "Error",
+    "externalLink": "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Error",
+    "memberof": "BuiltinExternal/ECMAScriptExternal.js",
+    "static": true,
+    "longname": "BuiltinExternal/ECMAScriptExternal.js~Error",
+    "access": null,
+    "description": "",
+    "builtinExternal": true
+  },
+  {
+    "__docId__": 39,
+    "kind": "external",
+    "name": "EvalError",
+    "externalLink": "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/EvalError",
+    "memberof": "BuiltinExternal/ECMAScriptExternal.js",
+    "static": true,
+    "longname": "BuiltinExternal/ECMAScriptExternal.js~EvalError",
+    "access": null,
+    "description": "",
+    "builtinExternal": true
+  },
+  {
+    "__docId__": 40,
+    "kind": "external",
+    "name": "InternalError",
+    "externalLink": "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/InternalError",
+    "memberof": "BuiltinExternal/ECMAScriptExternal.js",
+    "static": true,
+    "longname": "BuiltinExternal/ECMAScriptExternal.js~InternalError",
+    "access": null,
+    "description": "",
+    "builtinExternal": true
+  },
+  {
+    "__docId__": 41,
+    "kind": "external",
+    "name": "RangeError",
+    "externalLink": "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/RangeError",
+    "memberof": "BuiltinExternal/ECMAScriptExternal.js",
+    "static": true,
+    "longname": "BuiltinExternal/ECMAScriptExternal.js~RangeError",
+    "access": null,
+    "description": "",
+    "builtinExternal": true
+  },
+  {
+    "__docId__": 42,
+    "kind": "external",
+    "name": "ReferenceError",
+    "externalLink": "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/ReferenceError",
+    "memberof": "BuiltinExternal/ECMAScriptExternal.js",
+    "static": true,
+    "longname": "BuiltinExternal/ECMAScriptExternal.js~ReferenceError",
+    "access": null,
+    "description": "",
+    "builtinExternal": true
+  },
+  {
+    "__docId__": 43,
+    "kind": "external",
+    "name": "SyntaxError",
+    "externalLink": "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/SyntaxError",
+    "memberof": "BuiltinExternal/ECMAScriptExternal.js",
+    "static": true,
+    "longname": "BuiltinExternal/ECMAScriptExternal.js~SyntaxError",
+    "access": null,
+    "description": "",
+    "builtinExternal": true
+  },
+  {
+    "__docId__": 44,
+    "kind": "external",
+    "name": "TypeError",
+    "externalLink": "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/TypeError",
+    "memberof": "BuiltinExternal/ECMAScriptExternal.js",
+    "static": true,
+    "longname": "BuiltinExternal/ECMAScriptExternal.js~TypeError",
+    "access": null,
+    "description": "",
+    "builtinExternal": true
+  },
+  {
+    "__docId__": 45,
+    "kind": "external",
+    "name": "URIError",
+    "externalLink": "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/URIError",
+    "memberof": "BuiltinExternal/ECMAScriptExternal.js",
+    "static": true,
+    "longname": "BuiltinExternal/ECMAScriptExternal.js~URIError",
+    "access": null,
+    "description": "",
+    "builtinExternal": true
+  },
+  {
+    "__docId__": 46,
+    "kind": "external",
+    "name": "Number",
+    "externalLink": "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Number",
+    "memberof": "BuiltinExternal/ECMAScriptExternal.js",
+    "static": true,
+    "longname": "BuiltinExternal/ECMAScriptExternal.js~Number",
+    "access": null,
+    "description": "",
+    "builtinExternal": true
+  },
+  {
+    "__docId__": 47,
+    "kind": "external",
+    "name": "number",
+    "externalLink": "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Number",
+    "memberof": "BuiltinExternal/ECMAScriptExternal.js",
+    "static": true,
+    "longname": "BuiltinExternal/ECMAScriptExternal.js~number",
+    "access": null,
+    "description": "",
+    "builtinExternal": true
+  },
+  {
+    "__docId__": 48,
+    "kind": "external",
+    "name": "Date",
+    "externalLink": "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Date",
+    "memberof": "BuiltinExternal/ECMAScriptExternal.js",
+    "static": true,
+    "longname": "BuiltinExternal/ECMAScriptExternal.js~Date",
+    "access": null,
+    "description": "",
+    "builtinExternal": true
+  },
+  {
+    "__docId__": 49,
+    "kind": "external",
+    "name": "String",
+    "externalLink": "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/String",
+    "memberof": "BuiltinExternal/ECMAScriptExternal.js",
+    "static": true,
+    "longname": "BuiltinExternal/ECMAScriptExternal.js~String",
+    "access": null,
+    "description": "",
+    "builtinExternal": true
+  },
+  {
+    "__docId__": 50,
+    "kind": "external",
+    "name": "string",
+    "externalLink": "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/String",
+    "memberof": "BuiltinExternal/ECMAScriptExternal.js",
+    "static": true,
+    "longname": "BuiltinExternal/ECMAScriptExternal.js~string",
+    "access": null,
+    "description": "",
+    "builtinExternal": true
+  },
+  {
+    "__docId__": 51,
+    "kind": "external",
+    "name": "RegExp",
+    "externalLink": "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/RegExp",
+    "memberof": "BuiltinExternal/ECMAScriptExternal.js",
+    "static": true,
+    "longname": "BuiltinExternal/ECMAScriptExternal.js~RegExp",
+    "access": null,
+    "description": "",
+    "builtinExternal": true
+  },
+  {
+    "__docId__": 52,
+    "kind": "external",
+    "name": "Array",
+    "externalLink": "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Array",
+    "memberof": "BuiltinExternal/ECMAScriptExternal.js",
+    "static": true,
+    "longname": "BuiltinExternal/ECMAScriptExternal.js~Array",
+    "access": null,
+    "description": "",
+    "builtinExternal": true
+  },
+  {
+    "__docId__": 53,
+    "kind": "external",
+    "name": "Int8Array",
+    "externalLink": "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Int8Array",
+    "memberof": "BuiltinExternal/ECMAScriptExternal.js",
+    "static": true,
+    "longname": "BuiltinExternal/ECMAScriptExternal.js~Int8Array",
+    "access": null,
+    "description": "",
+    "builtinExternal": true
+  },
+  {
+    "__docId__": 54,
+    "kind": "external",
+    "name": "Uint8Array",
+    "externalLink": "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Uint8Array",
+    "memberof": "BuiltinExternal/ECMAScriptExternal.js",
+    "static": true,
+    "longname": "BuiltinExternal/ECMAScriptExternal.js~Uint8Array",
+    "access": null,
+    "description": "",
+    "builtinExternal": true
+  },
+  {
+    "__docId__": 55,
+    "kind": "external",
+    "name": "Uint8ClampedArray",
+    "externalLink": "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Uint8ClampedArray",
+    "memberof": "BuiltinExternal/ECMAScriptExternal.js",
+    "static": true,
+    "longname": "BuiltinExternal/ECMAScriptExternal.js~Uint8ClampedArray",
+    "access": null,
+    "description": "",
+    "builtinExternal": true
+  },
+  {
+    "__docId__": 56,
+    "kind": "external",
+    "name": "Int16Array",
+    "externalLink": "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Int16Array",
+    "memberof": "BuiltinExternal/ECMAScriptExternal.js",
+    "static": true,
+    "longname": "BuiltinExternal/ECMAScriptExternal.js~Int16Array",
+    "access": null,
+    "description": "",
+    "builtinExternal": true
+  },
+  {
+    "__docId__": 57,
+    "kind": "external",
+    "name": "Uint16Array",
+    "externalLink": "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Uint16Array",
+    "memberof": "BuiltinExternal/ECMAScriptExternal.js",
+    "static": true,
+    "longname": "BuiltinExternal/ECMAScriptExternal.js~Uint16Array",
+    "access": null,
+    "description": "",
+    "builtinExternal": true
+  },
+  {
+    "__docId__": 58,
+    "kind": "external",
+    "name": "Int32Array",
+    "externalLink": "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Int32Array",
+    "memberof": "BuiltinExternal/ECMAScriptExternal.js",
+    "static": true,
+    "longname": "BuiltinExternal/ECMAScriptExternal.js~Int32Array",
+    "access": null,
+    "description": "",
+    "builtinExternal": true
+  },
+  {
+    "__docId__": 59,
+    "kind": "external",
+    "name": "Uint32Array",
+    "externalLink": "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Uint32Array",
+    "memberof": "BuiltinExternal/ECMAScriptExternal.js",
+    "static": true,
+    "longname": "BuiltinExternal/ECMAScriptExternal.js~Uint32Array",
+    "access": null,
+    "description": "",
+    "builtinExternal": true
+  },
+  {
+    "__docId__": 60,
+    "kind": "external",
+    "name": "Float32Array",
+    "externalLink": "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Float32Array",
+    "memberof": "BuiltinExternal/ECMAScriptExternal.js",
+    "static": true,
+    "longname": "BuiltinExternal/ECMAScriptExternal.js~Float32Array",
+    "access": null,
+    "description": "",
+    "builtinExternal": true
+  },
+  {
+    "__docId__": 61,
+    "kind": "external",
+    "name": "Float64Array",
+    "externalLink": "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Float64Array",
+    "memberof": "BuiltinExternal/ECMAScriptExternal.js",
+    "static": true,
+    "longname": "BuiltinExternal/ECMAScriptExternal.js~Float64Array",
+    "access": null,
+    "description": "",
+    "builtinExternal": true
+  },
+  {
+    "__docId__": 62,
+    "kind": "external",
+    "name": "Map",
+    "externalLink": "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Map",
+    "memberof": "BuiltinExternal/ECMAScriptExternal.js",
+    "static": true,
+    "longname": "BuiltinExternal/ECMAScriptExternal.js~Map",
+    "access": null,
+    "description": "",
+    "builtinExternal": true
+  },
+  {
+    "__docId__": 63,
+    "kind": "external",
+    "name": "Set",
+    "externalLink": "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Set",
+    "memberof": "BuiltinExternal/ECMAScriptExternal.js",
+    "static": true,
+    "longname": "BuiltinExternal/ECMAScriptExternal.js~Set",
+    "access": null,
+    "description": "",
+    "builtinExternal": true
+  },
+  {
+    "__docId__": 64,
+    "kind": "external",
+    "name": "WeakMap",
+    "externalLink": "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/WeakMap",
+    "memberof": "BuiltinExternal/ECMAScriptExternal.js",
+    "static": true,
+    "longname": "BuiltinExternal/ECMAScriptExternal.js~WeakMap",
+    "access": null,
+    "description": "",
+    "builtinExternal": true
+  },
+  {
+    "__docId__": 65,
+    "kind": "external",
+    "name": "WeakSet",
+    "externalLink": "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/WeakSet",
+    "memberof": "BuiltinExternal/ECMAScriptExternal.js",
+    "static": true,
+    "longname": "BuiltinExternal/ECMAScriptExternal.js~WeakSet",
+    "access": null,
+    "description": "",
+    "builtinExternal": true
+  },
+  {
+    "__docId__": 66,
+    "kind": "external",
+    "name": "ArrayBuffer",
+    "externalLink": "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/ArrayBuffer",
+    "memberof": "BuiltinExternal/ECMAScriptExternal.js",
+    "static": true,
+    "longname": "BuiltinExternal/ECMAScriptExternal.js~ArrayBuffer",
+    "access": null,
+    "description": "",
+    "builtinExternal": true
+  },
+  {
+    "__docId__": 67,
+    "kind": "external",
+    "name": "DataView",
+    "externalLink": "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/DataView",
+    "memberof": "BuiltinExternal/ECMAScriptExternal.js",
+    "static": true,
+    "longname": "BuiltinExternal/ECMAScriptExternal.js~DataView",
+    "access": null,
+    "description": "",
+    "builtinExternal": true
+  },
+  {
+    "__docId__": 68,
+    "kind": "external",
+    "name": "JSON",
+    "externalLink": "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/JSON",
+    "memberof": "BuiltinExternal/ECMAScriptExternal.js",
+    "static": true,
+    "longname": "BuiltinExternal/ECMAScriptExternal.js~JSON",
+    "access": null,
+    "description": "",
+    "builtinExternal": true
+  },
+  {
+    "__docId__": 69,
+    "kind": "external",
+    "name": "Promise",
+    "externalLink": "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Promise",
+    "memberof": "BuiltinExternal/ECMAScriptExternal.js",
+    "static": true,
+    "longname": "BuiltinExternal/ECMAScriptExternal.js~Promise",
+    "access": null,
+    "description": "",
+    "builtinExternal": true
+  },
+  {
+    "__docId__": 70,
+    "kind": "external",
+    "name": "Generator",
+    "externalLink": "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Generator",
+    "memberof": "BuiltinExternal/ECMAScriptExternal.js",
+    "static": true,
+    "longname": "BuiltinExternal/ECMAScriptExternal.js~Generator",
+    "access": null,
+    "description": "",
+    "builtinExternal": true
+  },
+  {
+    "__docId__": 71,
+    "kind": "external",
+    "name": "GeneratorFunction",
+    "externalLink": "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/GeneratorFunction",
+    "memberof": "BuiltinExternal/ECMAScriptExternal.js",
+    "static": true,
+    "longname": "BuiltinExternal/ECMAScriptExternal.js~GeneratorFunction",
+    "access": null,
+    "description": "",
+    "builtinExternal": true
+  },
+  {
+    "__docId__": 72,
+    "kind": "external",
+    "name": "Reflect",
+    "externalLink": "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Reflect",
+    "memberof": "BuiltinExternal/ECMAScriptExternal.js",
+    "static": true,
+    "longname": "BuiltinExternal/ECMAScriptExternal.js~Reflect",
+    "access": null,
+    "description": "",
+    "builtinExternal": true
+  },
+  {
+    "__docId__": 73,
+    "kind": "external",
+    "name": "Proxy",
+    "externalLink": "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Proxy",
+    "memberof": "BuiltinExternal/ECMAScriptExternal.js",
+    "static": true,
+    "longname": "BuiltinExternal/ECMAScriptExternal.js~Proxy",
+    "access": null,
+    "description": "",
+    "lineNumber": 193,
+    "builtinExternal": true
+  },
+  {
+    "__docId__": 75,
+    "kind": "external",
+    "name": "CanvasRenderingContext2D",
+    "externalLink": "https://developer.mozilla.org/en-US/docs/Web/API/CanvasRenderingContext2D",
+    "memberof": "BuiltinExternal/WebAPIExternal.js",
+    "static": true,
+    "longname": "BuiltinExternal/WebAPIExternal.js~CanvasRenderingContext2D",
+    "access": null,
+    "description": "",
+    "builtinExternal": true
+  },
+  {
+    "__docId__": 76,
+    "kind": "external",
+    "name": "DocumentFragment",
+    "externalLink": "https://developer.mozilla.org/en-US/docs/Web/API/DocumentFragment",
+    "memberof": "BuiltinExternal/WebAPIExternal.js",
+    "static": true,
+    "longname": "BuiltinExternal/WebAPIExternal.js~DocumentFragment",
+    "access": null,
+    "description": "",
+    "builtinExternal": true
+  },
+  {
+    "__docId__": 77,
+    "kind": "external",
+    "name": "Element",
+    "externalLink": "https://developer.mozilla.org/en-US/docs/Web/API/Element",
+    "memberof": "BuiltinExternal/WebAPIExternal.js",
+    "static": true,
+    "longname": "BuiltinExternal/WebAPIExternal.js~Element",
+    "access": null,
+    "description": "",
+    "builtinExternal": true
+  },
+  {
+    "__docId__": 78,
+    "kind": "external",
+    "name": "Event",
+    "externalLink": "https://developer.mozilla.org/en-US/docs/Web/API/Event",
+    "memberof": "BuiltinExternal/WebAPIExternal.js",
+    "static": true,
+    "longname": "BuiltinExternal/WebAPIExternal.js~Event",
+    "access": null,
+    "description": "",
+    "builtinExternal": true
+  },
+  {
+    "__docId__": 79,
+    "kind": "external",
+    "name": "Node",
+    "externalLink": "https://developer.mozilla.org/en-US/docs/Web/API/Node",
+    "memberof": "BuiltinExternal/WebAPIExternal.js",
+    "static": true,
+    "longname": "BuiltinExternal/WebAPIExternal.js~Node",
+    "access": null,
+    "description": "",
+    "builtinExternal": true
+  },
+  {
+    "__docId__": 80,
+    "kind": "external",
+    "name": "NodeList",
+    "externalLink": "https://developer.mozilla.org/en-US/docs/Web/API/NodeList",
+    "memberof": "BuiltinExternal/WebAPIExternal.js",
+    "static": true,
+    "longname": "BuiltinExternal/WebAPIExternal.js~NodeList",
+    "access": null,
+    "description": "",
+    "builtinExternal": true
+  },
+  {
+    "__docId__": 81,
+    "kind": "external",
+    "name": "XMLHttpRequest",
+    "externalLink": "https://developer.mozilla.org/en/docs/Web/API/XMLHttpRequest",
+    "memberof": "BuiltinExternal/WebAPIExternal.js",
+    "static": true,
+    "longname": "BuiltinExternal/WebAPIExternal.js~XMLHttpRequest",
+    "access": null,
+    "description": "",
+    "builtinExternal": true
+  },
+  {
+    "__docId__": 82,
+    "kind": "external",
+    "name": "AudioContext",
+    "externalLink": "https://developer.mozilla.org/en/docs/Web/API/AudioContext",
+    "memberof": "BuiltinExternal/WebAPIExternal.js",
+    "static": true,
+    "longname": "BuiltinExternal/WebAPIExternal.js~AudioContext",
+    "access": null,
+    "description": "",
+    "lineNumber": 34,
+    "builtinExternal": true
+  }
+]
